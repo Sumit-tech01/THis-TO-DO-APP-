@@ -1,4 +1,6 @@
 import { aggregateTasks } from "../repositories/task.repository.js";
+import { env } from "../config/env.js";
+import { logger } from "../config/logger.js";
 import {
   ALLOWED_PRIORITIES,
   ALLOWED_STATUSES,
@@ -9,6 +11,7 @@ import { MemoryTtlCache } from "../utils/memory-cache.js";
 
 const TASK_STATS_TTL_MS = 30_000;
 const cache = new MemoryTtlCache(TASK_STATS_TTL_MS);
+const shouldUseMemoryCache = env.NODE_ENV !== "production";
 
 const getMonthKey = (date) => {
   const year = date.getFullYear();
@@ -48,14 +51,32 @@ const getCacheKey = ({ userId, workspaceId, query }) =>
   `task-stats:${workspaceId}:${userId}:${JSON.stringify(query || {})}`;
 
 export const invalidateTaskStatsCache = ({ userId, workspaceId }) => {
+  logger.info(
+    {
+      userId,
+      workspaceId,
+      cacheLayer: shouldUseMemoryCache ? "memory" : "disabled",
+    },
+    "task-stats-cache-invalidated"
+  );
+  if (!shouldUseMemoryCache) {
+    return;
+  }
   cache.clearByPrefix(`task-stats:${workspaceId}:${userId}:`);
 };
 
 export const getTaskStatsOverview = async ({ userId, workspaceId, filters, query }) => {
   const cacheKey = getCacheKey({ userId, workspaceId, query });
-  const cached = cache.get(cacheKey);
+  const cached = shouldUseMemoryCache ? cache.get(cacheKey) : null;
 
   if (cached) {
+    logger.debug(
+      {
+        userId,
+        workspaceId,
+      },
+      "task-stats-cache-hit"
+    );
     return cached;
   }
 
@@ -269,6 +290,19 @@ export const getTaskStatsOverview = async ({ userId, workspaceId, filters, query
     },
   };
 
-  cache.set(cacheKey, payload, TASK_STATS_TTL_MS);
+  logger.info(
+    {
+      userId,
+      workspaceId,
+      total: payload.summary.total,
+      completed: payload.summary.completed,
+      cacheLayer: shouldUseMemoryCache ? "memory" : "disabled",
+    },
+    "task-stats-recomputed"
+  );
+
+  if (shouldUseMemoryCache) {
+    cache.set(cacheKey, payload, TASK_STATS_TTL_MS);
+  }
   return payload;
 };

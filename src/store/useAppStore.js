@@ -12,6 +12,8 @@ let tasksAbortController = null;
 let statsAbortController = null;
 let analyticsAbortController = null;
 let realtimeRefreshTimer = null;
+let mutationRefreshPromise = null;
+let suppressRealtimeRefreshUntil = 0;
 
 const applyTheme = (theme) => {
   const nextTheme = theme === "dark" ? "dark" : "light";
@@ -397,6 +399,10 @@ export const useAppStore = create(
         }),
 
       scheduleRealtimeRefresh: () => {
+        if (Date.now() < suppressRealtimeRefreshUntil) {
+          return;
+        }
+
         if (realtimeRefreshTimer) {
           clearTimeout(realtimeRefreshTimer);
         }
@@ -405,6 +411,24 @@ export const useAppStore = create(
           get().fetchDashboardStats();
           get().fetchAnalyticsOverview();
         }, 350);
+      },
+
+      refreshAfterTaskMutation: async () => {
+        if (mutationRefreshPromise) {
+          return mutationRefreshPromise;
+        }
+
+        suppressRealtimeRefreshUntil = Date.now() + 1500;
+
+        mutationRefreshPromise = Promise.all([
+          get().fetchTasks(),
+          get().fetchDashboardStats(),
+          get().fetchAnalyticsOverview(),
+        ]).finally(() => {
+          mutationRefreshPromise = null;
+        });
+
+        return mutationRefreshPromise;
       },
 
       bootstrapSession: async () => {
@@ -740,11 +764,7 @@ export const useAppStore = create(
           }
 
           get().closeTaskModal();
-          await Promise.all([
-            get().fetchTasks(),
-            get().fetchDashboardStats(),
-            get().fetchAnalyticsOverview(),
-          ]);
+          await get().refreshAfterTaskMutation();
           return true;
         } catch (error) {
           toast.error(error.message || "Failed to save task.");
@@ -765,11 +785,7 @@ export const useAppStore = create(
           get().closeDeleteModal();
           get().addActivity("TASK_DELETED", { taskId: target.id, title: target.title });
           toast.success("Task deleted.");
-          await Promise.all([
-            get().fetchTasks(),
-            get().fetchDashboardStats(),
-            get().fetchAnalyticsOverview(),
-          ]);
+          await get().refreshAfterTaskMutation();
         } catch (error) {
           toast.error(error.message || "Failed to delete task.");
         }
@@ -817,11 +833,7 @@ export const useAppStore = create(
 
           get().addActivity("TASK_STATUS_UPDATED", { taskId, status });
           toast.success("Status updated.");
-          await Promise.all([
-            get().fetchTasks(),
-            get().fetchDashboardStats(),
-            get().fetchAnalyticsOverview(),
-          ]);
+          await get().refreshAfterTaskMutation();
         } catch (error) {
           set({ tasks: previousTasks });
           toast.error(error.message || "Failed to update status.");
@@ -929,11 +941,7 @@ export const useAppStore = create(
           }
         }
 
-        await Promise.all([
-          get().fetchTasks(),
-          get().fetchDashboardStats(),
-          get().fetchAnalyticsOverview(),
-        ]);
+        await get().refreshAfterTaskMutation();
         get().addActivity("TASKS_IMPORTED", { count: createdCount });
         toast.success(`${createdCount} tasks imported.`);
       },

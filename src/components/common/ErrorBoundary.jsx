@@ -35,10 +35,10 @@ class ErrorBoundary extends React.Component {
           </pre>
           <button
             type="button"
-            onClick={() => window.location.reload()}
+            onClick={() => this.setState({ hasError: false, errorMessage: "" })}
             className="mt-4 rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white"
           >
-            Reload
+            Try Again
           </button>
         </div>
       </div>

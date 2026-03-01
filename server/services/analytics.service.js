@@ -1,8 +1,13 @@
 import { aggregateTasks } from "../repositories/task.repository.js";
+import { env } from "../config/env.js";
+import { logger } from "../config/logger.js";
 import { MemoryTtlCache } from "../utils/memory-cache.js";
 
 const ANALYTICS_TTL_MS = 30_000;
 const analyticsCache = new MemoryTtlCache(ANALYTICS_TTL_MS);
+const shouldUseMemoryCache = env.NODE_ENV !== "production";
+const analyticsDirtyUntil = new Map();
+const ANALYTICS_DIRTY_MS = 45_000;
 
 const getAnalyticsCacheKey = ({ userId, workspaceId, query }) =>
   `analytics:${workspaceId}:${userId}:${JSON.stringify(query || {})}`;
@@ -33,13 +38,48 @@ const buildWeeklyWindow = (weeks = 10) => {
 };
 
 export const invalidateAnalyticsCache = ({ userId, workspaceId }) => {
+  const dirtyKey = `${workspaceId}:${userId}`;
+  analyticsDirtyUntil.set(dirtyKey, Date.now() + ANALYTICS_DIRTY_MS);
+  logger.info(
+    {
+      userId,
+      workspaceId,
+      dirtyForMs: ANALYTICS_DIRTY_MS,
+      cacheLayer: shouldUseMemoryCache ? "memory" : "disabled",
+    },
+    "analytics-cache-invalidated"
+  );
+  if (!shouldUseMemoryCache) {
+    return;
+  }
   analyticsCache.clearByPrefix(`analytics:${workspaceId}:${userId}:`);
+};
+
+const isAnalyticsDirty = ({ userId, workspaceId }) => {
+  const key = `${workspaceId}:${userId}`;
+  const until = analyticsDirtyUntil.get(key);
+  if (!until) {
+    return false;
+  }
+  if (until <= Date.now()) {
+    analyticsDirtyUntil.delete(key);
+    return false;
+  }
+  return true;
 };
 
 export const getAnalyticsOverview = async ({ userId, workspaceId, filters, query }) => {
   const cacheKey = getAnalyticsCacheKey({ userId, workspaceId, query });
-  const cached = analyticsCache.get(cacheKey);
-  if (cached) {
+  const analyticsMarkedDirty = isAnalyticsDirty({ userId, workspaceId });
+  const cached = shouldUseMemoryCache && !analyticsMarkedDirty ? analyticsCache.get(cacheKey) : null;
+  if (cached && !analyticsMarkedDirty) {
+    logger.debug(
+      {
+        userId,
+        workspaceId,
+      },
+      "analytics-cache-hit"
+    );
     return cached;
   }
 
@@ -198,7 +238,22 @@ export const getAnalyticsOverview = async ({ userId, workspaceId, filters, query
     ],
   };
 
-  analyticsCache.set(cacheKey, payload, ANALYTICS_TTL_MS);
+  logger.info(
+    {
+      userId,
+      workspaceId,
+      weeklyPoints: payload.weeklyVelocity.length,
+      dirtyTriggeredRecompute: analyticsMarkedDirty,
+      cacheLayer: shouldUseMemoryCache ? "memory" : "disabled",
+    },
+    "analytics-recomputed"
+  );
+
+  if (shouldUseMemoryCache) {
+    analyticsCache.set(cacheKey, payload, ANALYTICS_TTL_MS);
+  }
+  if (analyticsMarkedDirty) {
+    analyticsDirtyUntil.delete(`${workspaceId}:${userId}`);
+  }
   return payload;
 };
-

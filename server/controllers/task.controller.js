@@ -1,5 +1,8 @@
+import mongoose from "mongoose";
+import { logger } from "../config/logger.js";
 import { emitToUser, emitToWorkspace } from "../realtime/socket.js";
 import {
+  aggregateTasks,
   createTaskRecord,
   deleteTaskByIdForUser,
   findTaskByIdForUser,
@@ -29,6 +32,42 @@ const sanitizeTaskPayload = (task) => {
     ...raw,
     id: raw._id?.toString?.() || raw.id,
   };
+};
+
+const toObjectId = (value) =>
+  value instanceof mongoose.Types.ObjectId ? value : new mongoose.Types.ObjectId(value);
+
+const captureMutationStats = async ({ userId, workspaceId }) => {
+  const [row] = await aggregateTasks([
+    {
+      $match: {
+        userId: toObjectId(userId),
+        workspaceId: toObjectId(workspaceId),
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        total: { $sum: 1 },
+        notStarted: { $sum: { $cond: [{ $eq: ["$status", "Not Started"] }, 1, 0] } },
+        onHold: { $sum: { $cond: [{ $eq: ["$status", "On Hold"] }, 1, 0] } },
+        inProgress: { $sum: { $cond: [{ $eq: ["$status", "In Progress"] }, 1, 0] } },
+        deferred: { $sum: { $cond: [{ $eq: ["$status", "Deferred"] }, 1, 0] } },
+        completed: { $sum: { $cond: [{ $eq: ["$status", "Completed"] }, 1, 0] } },
+      },
+    },
+  ]);
+
+  return (
+    row || {
+      total: 0,
+      notStarted: 0,
+      onHold: 0,
+      inProgress: 0,
+      deferred: 0,
+      completed: 0,
+    }
+  );
 };
 
 const invalidateTaskRelatedCaches = ({ userId, workspaceId }) => {
@@ -70,6 +109,10 @@ const buildMutableTaskUpdates = (body) => {
 
 export const createTask = async (req, res, next) => {
   try {
+    const beforeStats = await captureMutationStats({
+      userId: req.user.id,
+      workspaceId: req.workspace.id,
+    });
     const { title, description, priority, status, dueDate, deferredDate, remarks } = req.body;
 
     if (!title) {
@@ -117,6 +160,21 @@ export const createTask = async (req, res, next) => {
       type: "TASK_CREATED",
       metadata: { taskId: task._id.toString(), title: task.title },
     });
+
+    const afterStats = await captureMutationStats({
+      userId: req.user.id,
+      workspaceId: req.workspace.id,
+    });
+    logger.info(
+      {
+        userId: req.user.id,
+        workspaceId: req.workspace.id,
+        taskId: task._id.toString(),
+        beforeStats,
+        afterStats,
+      },
+      "task-mutation-stats-delta"
+    );
 
     return res.status(201).json({
       message: "Task created",
@@ -209,6 +267,16 @@ export const getTaskStats = async (req, res, next) => {
       query: req.query,
     });
 
+    logger.debug(
+      {
+        userId: req.user.id,
+        workspaceId: req.workspace.id,
+        total: data?.summary?.total ?? 0,
+        completed: data?.summary?.completed ?? 0,
+      },
+      "task-stats-response"
+    );
+
     return res.status(200).json({ data });
   } catch (error) {
     return next(error);
@@ -217,6 +285,10 @@ export const getTaskStats = async (req, res, next) => {
 
 export const updateTask = async (req, res, next) => {
   try {
+    const beforeStats = await captureMutationStats({
+      userId: req.user.id,
+      workspaceId: req.workspace.id,
+    });
     const { id } = req.params;
     const updates = buildMutableTaskUpdates(req.body);
 
@@ -317,6 +389,23 @@ export const updateTask = async (req, res, next) => {
       });
     }
 
+    const afterStats = await captureMutationStats({
+      userId: req.user.id,
+      workspaceId: req.workspace.id,
+    });
+    logger.info(
+      {
+        userId: req.user.id,
+        workspaceId: req.workspace.id,
+        taskId: task._id.toString(),
+        beforeStats,
+        afterStats,
+        previousStatus,
+        nextStatus: task.status,
+      },
+      "task-mutation-stats-delta"
+    );
+
     return res.status(200).json({
       message: "Task updated",
       task,
@@ -328,6 +417,10 @@ export const updateTask = async (req, res, next) => {
 
 export const deleteTask = async (req, res, next) => {
   try {
+    const beforeStats = await captureMutationStats({
+      userId: req.user.id,
+      workspaceId: req.workspace.id,
+    });
     const { id } = req.params;
 
     const task = await deleteTaskByIdForUser({
@@ -354,6 +447,21 @@ export const deleteTask = async (req, res, next) => {
       type: "TASK_DELETED",
       metadata: { taskId: task._id.toString(), title: task.title },
     });
+
+    const afterStats = await captureMutationStats({
+      userId: req.user.id,
+      workspaceId: req.workspace.id,
+    });
+    logger.info(
+      {
+        userId: req.user.id,
+        workspaceId: req.workspace.id,
+        taskId: task._id.toString(),
+        beforeStats,
+        afterStats,
+      },
+      "task-mutation-stats-delta"
+    );
 
     return res.status(200).json({ message: "Task deleted" });
   } catch (error) {
