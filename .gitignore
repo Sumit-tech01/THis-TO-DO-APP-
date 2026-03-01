@@ -1,0 +1,17 @@
+node_modules/
+dist/
+
+# Environment files (keep examples tracked)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+server/.env
+server/.env.local
+server/.env.development.local
+server/.env.test.local
+server/.env.production.local
+
+!.env.example
+!server/.env.example

@@ -1,0 +1,65 @@
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --app-bg: #f1f5f9;
+    --app-text: #0f172a;
+    --app-grad-1: rgba(16, 185, 129, 0.15);
+    --app-grad-2: rgba(14, 165, 233, 0.12);
+    color-scheme: light;
+  }
+
+  html[data-theme="dark"] {
+    --app-bg: #020617;
+    --app-text: #f1f5f9;
+    --app-grad-1: rgba(16, 185, 129, 0.12);
+    --app-grad-2: rgba(14, 165, 233, 0.1);
+    color-scheme: dark;
+  }
+
+  html,
+  body,
+  #root {
+    @apply h-full;
+  }
+
+  body {
+    @apply antialiased transition-colors duration-300;
+    background-color: var(--app-bg);
+    color: var(--app-text);
+    background-image: radial-gradient(
+        circle at 100% 0%,
+        var(--app-grad-1),
+        transparent 42%
+      ),
+      radial-gradient(circle at 0% 100%, var(--app-grad-2), transparent 40%);
+  }
+}
+
+@layer components {
+  .panel {
+    @apply rounded-2xl border border-slate-200 bg-white shadow-card dark:border-slate-800 dark:bg-slate-900;
+  }
+
+  .input-base {
+    @apply w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:ring-emerald-900;
+  }
+
+  .button-base {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: rgba(100, 116, 139, 0.45);
+  border-radius: 9999px;
+}
