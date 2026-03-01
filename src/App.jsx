@@ -35,6 +35,7 @@ const App = () => {
     activity,
     taskPagination,
     loading,
+    statsError,
     modals,
     hydrateTheme,
     bootstrapSession,
@@ -67,6 +68,7 @@ const App = () => {
       activity: state.activity,
       taskPagination: state.taskPagination,
       loading: state.loading,
+      statsError: state.statsError,
       modals: state.modals,
       hydrateTheme: state.hydrateTheme,
       bootstrapSession: state.bootstrapSession,
@@ -169,24 +171,26 @@ const App = () => {
 
   const filteredTasks = useMemo(() => tasks, [tasks]);
 
-  const summary = dashboardStats.summary;
-  const completionPercent = dashboardStats.completionPercent;
+  const summary = dashboardStats?.summary || null;
+  const completionPercent = dashboardStats?.completionPercent || 0;
   const priorityData = useMemo(
     () =>
-      (dashboardStats.priorityData || []).map((item) => ({
+      (dashboardStats?.priorityData || []).map((item) => ({
         ...item,
         fill: PRIORITY_COLORS[item.name] || "#94a3b8",
       })),
-    [dashboardStats.priorityData]
+    [dashboardStats?.priorityData]
   );
   const statusData = useMemo(
     () =>
-      (dashboardStats.statusData || []).map((item) => ({
+      (dashboardStats?.statusData || []).map((item) => ({
         ...item,
         fill: STATUS_COLORS[item.name]?.chart || "#94a3b8",
       })),
-    [dashboardStats.statusData]
+    [dashboardStats?.statusData]
   );
+
+  const statsReady = Boolean(dashboardStats && summary);
 
   const handleSort = useCallback((key) => setSorting(key), [setSorting]);
   const handleSearchChange = useCallback((value) => setSearchInput(value), []);
@@ -290,9 +294,13 @@ const App = () => {
               onLogout={logout}
             />
 
-            {loading.tasks ? <SummaryCardsSkeleton /> : <SummaryCards summary={summary} />}
+            {loading.tasks || loading.stats || !statsReady ? (
+              <SummaryCardsSkeleton />
+            ) : (
+              <SummaryCards summary={summary} />
+            )}
 
-            {loading.tasks ? (
+            {loading.tasks || loading.stats || !statsReady ? (
               <ChartsSkeleton />
             ) : (
               <Suspense fallback={<ChartsSkeleton />}>
@@ -304,6 +312,11 @@ const App = () => {
                   statusData={statusData}
                 />
               </Suspense>
+            )}
+            {statsError && (
+              <div className="rounded-xl border border-rose-300/60 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-800 dark:bg-rose-900/20 dark:text-rose-200">
+                {statsError}
+              </div>
             )}
 
             <Suspense fallback={<ChartsSkeleton />}>

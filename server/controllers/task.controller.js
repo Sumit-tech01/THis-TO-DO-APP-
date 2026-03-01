@@ -1,8 +1,6 @@
-import mongoose from "mongoose";
 import { logger } from "../config/logger.js";
 import { emitToUser, emitToWorkspace } from "../realtime/socket.js";
 import {
-  aggregateTasks,
   createTaskRecord,
   deleteTaskByIdForUser,
   findTaskByIdForUser,
@@ -12,6 +10,8 @@ import {
 } from "../repositories/task.repository.js";
 import { invalidateAnalyticsCache } from "../services/analytics.service.js";
 import { recordActivity } from "../services/activity.service.js";
+import { TASK_PRIORITY } from "../constants/task-priority.js";
+import { TASK_STATUS } from "../constants/task-status.js";
 import {
   ALLOWED_PRIORITIES,
   ALLOWED_STATUSES,
@@ -22,6 +22,7 @@ import {
   sanitizeSort,
 } from "../services/task-query.service.js";
 import { getTaskStatsOverview, invalidateTaskStatsCache } from "../services/task-stats.service.js";
+import { getWorkspaceTaskStats } from "../services/workspace-task-stats.service.js";
 
 const sanitizeTaskPayload = (task) => {
   if (!task) {
@@ -34,40 +35,8 @@ const sanitizeTaskPayload = (task) => {
   };
 };
 
-const toObjectId = (value) =>
-  value instanceof mongoose.Types.ObjectId ? value : new mongoose.Types.ObjectId(value);
-
 const captureMutationStats = async ({ userId, workspaceId }) => {
-  const [row] = await aggregateTasks([
-    {
-      $match: {
-        userId: toObjectId(userId),
-        workspaceId: toObjectId(workspaceId),
-      },
-    },
-    {
-      $group: {
-        _id: null,
-        total: { $sum: 1 },
-        notStarted: { $sum: { $cond: [{ $eq: ["$status", "Not Started"] }, 1, 0] } },
-        onHold: { $sum: { $cond: [{ $eq: ["$status", "On Hold"] }, 1, 0] } },
-        inProgress: { $sum: { $cond: [{ $eq: ["$status", "In Progress"] }, 1, 0] } },
-        deferred: { $sum: { $cond: [{ $eq: ["$status", "Deferred"] }, 1, 0] } },
-        completed: { $sum: { $cond: [{ $eq: ["$status", "Completed"] }, 1, 0] } },
-      },
-    },
-  ]);
-
-  return (
-    row || {
-      total: 0,
-      notStarted: 0,
-      onHold: 0,
-      inProgress: 0,
-      deferred: 0,
-      completed: 0,
-    }
-  );
+  return getWorkspaceTaskStats(workspaceId, { userId });
 };
 
 const invalidateTaskRelatedCaches = ({ userId, workspaceId }) => {
@@ -120,8 +89,9 @@ export const createTask = async (req, res, next) => {
     }
 
     const resolvedPriority =
-      priority && ALLOWED_PRIORITIES.includes(priority) ? priority : "Normal";
-    const resolvedStatus = status && ALLOWED_STATUSES.includes(status) ? status : "Not Started";
+      priority && ALLOWED_PRIORITIES.includes(priority) ? priority : TASK_PRIORITY.NORMAL;
+    const resolvedStatus =
+      status && ALLOWED_STATUSES.includes(status) ? status : TASK_STATUS.NOT_STARTED;
     const parsedDueDate = parseDate(dueDate);
     const parsedDeferredDate = parseDate(deferredDate);
 
@@ -141,9 +111,9 @@ export const createTask = async (req, res, next) => {
       priority: resolvedPriority,
       status: resolvedStatus,
       dueDate: parsedDueDate,
-      deferredDate: resolvedStatus === "Deferred" ? parsedDeferredDate : null,
+      deferredDate: resolvedStatus === TASK_STATUS.DEFERRED ? parsedDeferredDate : null,
       remarks: remarks || "",
-      completedAt: resolvedStatus === "Completed" ? new Date() : null,
+      completedAt: resolvedStatus === TASK_STATUS.COMPLETED ? new Date() : null,
     });
 
     invalidateTaskRelatedCaches({ userId: req.user.id, workspaceId: req.workspace.id });
@@ -333,14 +303,14 @@ export const updateTask = async (req, res, next) => {
     const previousStatus = existingTask.status;
     const nextStatus = updates.status || previousStatus;
 
-    if (nextStatus === "Completed") {
+    if (nextStatus === TASK_STATUS.COMPLETED) {
       updates.completedAt = new Date();
       updates.deferredDate = null;
     } else {
       updates.completedAt = null;
     }
 
-    if (nextStatus !== "Deferred") {
+    if (nextStatus !== TASK_STATUS.DEFERRED) {
       updates.deferredDate = null;
     }
 
@@ -367,7 +337,7 @@ export const updateTask = async (req, res, next) => {
       },
     });
 
-    if (previousStatus !== "Completed" && task.status === "Completed") {
+    if (previousStatus !== TASK_STATUS.COMPLETED && task.status === TASK_STATUS.COMPLETED) {
       emitTaskEvent({
         userId: req.user.id,
         workspaceId: req.workspace.id,

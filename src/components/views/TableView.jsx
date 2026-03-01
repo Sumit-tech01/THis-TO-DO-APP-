@@ -1,7 +1,7 @@
 import { memo, useMemo } from "react";
 import { List } from "react-window";
 import { FiArrowDown, FiArrowUp, FiEdit2, FiTrash2 } from "react-icons/fi";
-import { STATUS_COLORS, STATUSES } from "../../constants";
+import { STATUS_COLORS, STATUSES, TASK_STATUS } from "../../constants";
 import { formatDate } from "../../utils/date";
 
 const headerColumns = [
@@ -29,7 +29,7 @@ const SortIndicator = ({ isActive, direction }) => {
 
 const Row = memo(({ index, style, tasks, serialStart, onEdit, onDelete, onStatusChange }) => {
   const task = tasks[index];
-  const statusStyle = STATUS_COLORS[task.status] || STATUS_COLORS["Not Started"];
+  const statusStyle = STATUS_COLORS[task.status] || STATUS_COLORS[TASK_STATUS.NOT_STARTED];
 
   return (
     <div

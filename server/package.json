@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "node --watch server.js",
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test \"tests/**/*.test.js\""
   },
   "dependencies": {
     "@sendgrid/mail": "^8.1.6",

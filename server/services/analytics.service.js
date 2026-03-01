@@ -2,6 +2,7 @@ import { aggregateTasks } from "../repositories/task.repository.js";
 import { env } from "../config/env.js";
 import { logger } from "../config/logger.js";
 import { MemoryTtlCache } from "../utils/memory-cache.js";
+import { TASK_STATUS } from "../constants/task-status.js";
 
 const ANALYTICS_TTL_MS = 30_000;
 const analyticsCache = new MemoryTtlCache(ANALYTICS_TTL_MS);
@@ -129,22 +130,22 @@ export const getAnalyticsOverview = async ({ userId, workspaceId, filters, query
         overdueOpen: [
           {
             $match: {
-              status: { $ne: "Completed" },
+              status: { $ne: TASK_STATUS.COMPLETED },
               dueDate: { $type: "date", $lt: now },
             },
           },
           { $count: "count" },
         ],
         openTotals: [
-          { $match: { status: { $ne: "Completed" } } },
+          { $match: { status: { $ne: TASK_STATUS.COMPLETED } } },
           { $count: "count" },
         ],
         inProgressOpen: [
-          { $match: { status: "In Progress" } },
+          { $match: { status: TASK_STATUS.IN_PROGRESS } },
           { $count: "count" },
         ],
         agingDistribution: [
-          { $match: { status: { $ne: "Completed" } } },
+          { $match: { status: { $ne: TASK_STATUS.COMPLETED } } },
           {
             $project: {
               ageDays: {

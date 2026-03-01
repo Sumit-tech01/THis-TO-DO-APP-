@@ -1,13 +1,13 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import { FiX } from "react-icons/fi";
-import { PRIORITIES, STATUSES } from "../../constants";
+import { PRIORITIES, STATUSES, TASK_STATUS } from "../../constants";
 
 const emptyTask = {
   title: "",
   description: "",
   dueDate: "",
   priority: "Normal",
-  status: "Not Started",
+  status: TASK_STATUS.NOT_STARTED,
   deferredDate: "",
   remarks: "",
 };
@@ -29,7 +29,7 @@ const TaskFormModal = ({ isOpen, initialTask, onClose, onSubmit }) => {
         description: initialTask.description || "",
         dueDate: initialTask.dueDate?.slice(0, 10) || "",
         priority: initialTask.priority || "Normal",
-        status: initialTask.status || "Not Started",
+        status: initialTask.status || TASK_STATUS.NOT_STARTED,
         deferredDate: initialTask.deferredDate?.slice(0, 10) || "",
         remarks: initialTask.remarks || "",
       });
@@ -48,7 +48,7 @@ const TaskFormModal = ({ isOpen, initialTask, onClose, onSubmit }) => {
     setFormData((prev) => ({
       ...prev,
       [key]: value,
-      ...(key === "status" && value !== "Deferred" ? { deferredDate: "" } : {}),
+      ...(key === "status" && value !== TASK_STATUS.DEFERRED ? { deferredDate: "" } : {}),
     }));
   };
 
@@ -161,7 +161,7 @@ const TaskFormModal = ({ isOpen, initialTask, onClose, onSubmit }) => {
             <input
               type="date"
               value={formData.deferredDate}
-              disabled={formData.status !== "Deferred"}
+              disabled={formData.status !== TASK_STATUS.DEFERRED}
               onChange={(event) => setValue("deferredDate", event.target.value)}
               className="input-base disabled:cursor-not-allowed disabled:opacity-50"
             />

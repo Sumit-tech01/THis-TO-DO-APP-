@@ -1,7 +1,10 @@
 import mongoose from "mongoose";
+import { TASK_PRIORITY_VALUES } from "../constants/task-priority.js";
+import { TASK_STATUS_ORDER_FOR_CHART, TASK_STATUS_VALUES } from "../constants/task-status.js";
+import { toObjectId } from "../utils/object-id.js";
 
-export const ALLOWED_PRIORITIES = ["High", "Normal", "Low"];
-export const ALLOWED_STATUSES = ["Not Started", "In Progress", "On Hold", "Deferred", "Completed"];
+export const ALLOWED_PRIORITIES = TASK_PRIORITY_VALUES;
+export const ALLOWED_STATUSES = TASK_STATUS_VALUES;
 export const ALLOWED_SORT_FIELDS = [
   "dueDate",
   "title",
@@ -11,7 +14,7 @@ export const ALLOWED_SORT_FIELDS = [
   "createdAt",
   "updatedAt",
 ];
-export const STATUS_ORDER_FOR_CHART = ["Completed", "Deferred", "In Progress", "On Hold", "Not Started"];
+export { TASK_STATUS_ORDER_FOR_CHART as STATUS_ORDER_FOR_CHART };
 
 export const MAX_TASK_LIMIT = 100;
 
@@ -46,17 +49,11 @@ export const sanitizeSort = ({ sortBy, sortOrder }) => {
 };
 
 export const buildTaskFilters = ({ query, userId, workspaceId }) => {
+  const workspaceObjectId = toObjectId(workspaceId);
+  const userObjectId = toObjectId(userId);
   const filters = {
-    userId,
-    $and: [
-      {
-        $or: [
-          { workspaceId },
-          { workspaceId: { $exists: false } },
-          { workspaceId: null },
-        ],
-      },
-    ],
+    userId: userObjectId,
+    workspaceId: workspaceObjectId,
   };
   const { status, priority, month, dueDate, search } = query;
 
@@ -98,6 +95,7 @@ export const buildTaskFilters = ({ query, userId, workspaceId }) => {
 
   if (search) {
     const regex = new RegExp(escapeRegex(String(search)), "i");
+    filters.$and = filters.$and || [];
     filters.$and.push({
       $or: [{ title: regex }, { description: regex }, { remarks: regex }, { status: regex }],
     });

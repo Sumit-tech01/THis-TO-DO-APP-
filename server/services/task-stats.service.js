@@ -2,12 +2,22 @@ import { aggregateTasks } from "../repositories/task.repository.js";
 import { env } from "../config/env.js";
 import { logger } from "../config/logger.js";
 import {
+  TASK_STATUS,
+  TASK_STATUS_ORDER_FOR_CHART,
+  TASK_STATUS_SUMMARY_KEYS,
+} from "../constants/task-status.js";
+import { incrementDashboardStatsMismatch } from "./dashboard-metrics.service.js";
+import {
   ALLOWED_PRIORITIES,
-  ALLOWED_STATUSES,
-  STATUS_ORDER_FOR_CHART,
   buildEmptyCountMap,
 } from "./task-query.service.js";
 import { MemoryTtlCache } from "../utils/memory-cache.js";
+import { getWorkspaceTaskStats } from "./workspace-task-stats.service.js";
+import {
+  getTaskStatsSnapshot,
+  invalidateTaskStatsSnapshot,
+  saveTaskStatsSnapshot,
+} from "./task-stats-snapshot.service.js";
 
 const TASK_STATS_TTL_MS = 30_000;
 const cache = new MemoryTtlCache(TASK_STATS_TTL_MS);
@@ -60,9 +70,11 @@ export const invalidateTaskStatsCache = ({ userId, workspaceId }) => {
     "task-stats-cache-invalidated"
   );
   if (!shouldUseMemoryCache) {
+    invalidateTaskStatsSnapshot({ userId, workspaceId });
     return;
   }
   cache.clearByPrefix(`task-stats:${workspaceId}:${userId}:`);
+  invalidateTaskStatsSnapshot({ userId, workspaceId });
 };
 
 export const getTaskStatsOverview = async ({ userId, workspaceId, filters, query }) => {
@@ -81,19 +93,48 @@ export const getTaskStatsOverview = async ({ userId, workspaceId, filters, query
   }
 
   const now = new Date();
+  const summarySnapshot = getTaskStatsSnapshot({ userId, workspaceId, query });
+  const summary =
+    summarySnapshot || (await getWorkspaceTaskStats(workspaceId, { userId, filters }));
+
+  if (!summary || typeof summary.total !== "number") {
+    const error = new Error("Unable to compute task summary");
+    error.statusCode = 500;
+    throw error;
+  }
+  const breakdownSum =
+    summary.notStarted +
+    summary.inProgress +
+    summary.onHold +
+    summary.deferred +
+    summary.completed;
+
+  if (summary.total > 0 && breakdownSum === 0) {
+    const mismatchTotal = incrementDashboardStatsMismatch();
+    logger.error(
+      {
+        userId,
+        workspaceId,
+        total: summary.total,
+        breakdownSum,
+        dashboardStatsMismatchTotal: mismatchTotal,
+      },
+      "dashboard-stats-mismatch-detected"
+    );
+
+    const error = new Error("Task stats inconsistency detected");
+    error.statusCode = 500;
+    throw error;
+  }
+
+  if (!summarySnapshot) {
+    saveTaskStatsSnapshot({ userId, workspaceId, query, summary });
+  }
 
   const [result = {}] = await aggregateTasks([
     { $match: filters },
     {
       $facet: {
-        statusCounts: [
-          {
-            $group: {
-              _id: "$status",
-              count: { $sum: 1 },
-            },
-          },
-        ],
         priorityCounts: [
           {
             $group: {
@@ -102,23 +143,10 @@ export const getTaskStatsOverview = async ({ userId, workspaceId, filters, query
             },
           },
         ],
-        totals: [
-          {
-            $group: {
-              _id: null,
-              total: { $sum: 1 },
-              completed: {
-                $sum: {
-                  $cond: [{ $eq: ["$status", "Completed"] }, 1, 0],
-                },
-              },
-            },
-          },
-        ],
         overdue: [
           {
             $match: {
-              status: { $ne: "Completed" },
+              status: { $ne: TASK_STATUS.COMPLETED },
               dueDate: { $type: "date", $lt: now },
             },
           },
@@ -140,7 +168,7 @@ export const getTaskStatsOverview = async ({ userId, workspaceId, filters, query
                 $cond: [
                   {
                     $and: [
-                      { $eq: ["$status", "Completed"] },
+                      { $eq: ["$status", TASK_STATUS.COMPLETED] },
                       { $ne: ["$dueDate", null] },
                       { $lte: ["$completedAt", "$dueDate"] },
                     ],
@@ -202,25 +230,20 @@ export const getTaskStatsOverview = async ({ userId, workspaceId, filters, query
     },
   ]);
 
-  const statusCounts = {
-    ...buildEmptyCountMap(ALLOWED_STATUSES),
-    ...toCountMap(result.statusCounts),
-  };
   const priorityCounts = {
     ...buildEmptyCountMap(ALLOWED_PRIORITIES),
     ...toCountMap(result.priorityCounts),
   };
 
-  const totals = result.totals?.[0] || { total: 0, completed: 0 };
   const completionMetrics = result.completionMetrics?.[0] || {
     avgCompletionHours: 0,
     completedCount: 0,
     onTimeCompleted: 0,
   };
 
-  const completionRatio = totals.total ? totals.completed / totals.total : 0;
-  const punctualityRatio = totals.completed
-    ? completionMetrics.onTimeCompleted / totals.completed
+  const completionRatio = summary.total ? summary.completed / summary.total : 0;
+  const punctualityRatio = summary.completed
+    ? completionMetrics.onTimeCompleted / summary.completed
     : 0;
   const productivityScore = Math.round((completionRatio * 60 + punctualityRatio * 40) * 100) / 100;
 
@@ -264,22 +287,15 @@ export const getTaskStatsOverview = async ({ userId, workspaceId, filters, query
   }));
 
   const payload = {
-    summary: {
-      total: totals.total,
-      notStarted: statusCounts["Not Started"] || 0,
-      onHold: statusCounts["On Hold"] || 0,
-      inProgress: statusCounts["In Progress"] || 0,
-      deferred: statusCounts.Deferred || 0,
-      completed: statusCounts.Completed || 0,
-    },
-    completionPercent: totals.total ? Math.round((totals.completed / totals.total) * 100) : 0,
+    summary,
+    completionPercent: summary.total ? Math.round((summary.completed / summary.total) * 100) : 0,
     priorityData: ALLOWED_PRIORITIES.map((name) => ({
       name,
       count: priorityCounts[name] || 0,
     })),
-    statusData: STATUS_ORDER_FOR_CHART.map((name) => ({
+    statusData: TASK_STATUS_ORDER_FOR_CHART.map((name) => ({
       name,
-      count: statusCounts[name] || 0,
+      count: summary[TASK_STATUS_SUMMARY_KEYS[name]] || 0,
     })),
     analytics: {
       overdueCount: result.overdue?.[0]?.count || 0,

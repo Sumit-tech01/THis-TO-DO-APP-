@@ -1,9 +1,10 @@
 import Task from "../models/Task.js";
+import { toObjectId } from "../utils/object-id.js";
 
 const buildTaskOwnershipQuery = ({ id, userId, workspaceId }) => ({
-  _id: id,
-  userId,
-  $or: [{ workspaceId }, { workspaceId: { $exists: false } }, { workspaceId: null }],
+  _id: toObjectId(id),
+  userId: toObjectId(userId),
+  workspaceId: toObjectId(workspaceId),
 });
 
 export const createTaskRecord = (payload) => Task.create(payload);

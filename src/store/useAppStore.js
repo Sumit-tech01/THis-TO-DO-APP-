@@ -4,7 +4,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { analyticsApi, authApi, taskApi } from "../api";
 import { configureApiAuth } from "../api/client";
-import { DEFAULT_PAGE_SIZE } from "../constants";
+import { DEFAULT_PAGE_SIZE, TASK_STATUS } from "../constants";
 
 const STORAGE_KEY = "ultimate_dashboard_app_store_v4";
 
@@ -14,6 +14,28 @@ let analyticsAbortController = null;
 let realtimeRefreshTimer = null;
 let mutationRefreshPromise = null;
 let suppressRealtimeRefreshUntil = 0;
+
+const isValidStatsPayload = (value) => {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const summary = value.summary;
+  if (!summary || typeof summary !== "object") {
+    return false;
+  }
+
+  const requiredSummaryKeys = [
+    "total",
+    "notStarted",
+    "onHold",
+    "inProgress",
+    "deferred",
+    "completed",
+  ];
+
+  return requiredSummaryKeys.every((key) => Number.isFinite(summary[key]));
+};
 
 const applyTheme = (theme) => {
   const nextTheme = theme === "dark" ? "dark" : "light";
@@ -30,37 +52,6 @@ const getInitialFilters = () => ({
   search: "",
   sortBy: "dueDate",
   sortOrder: "asc",
-});
-
-const getDefaultDashboardStats = () => ({
-  summary: {
-    total: 0,
-    notStarted: 0,
-    onHold: 0,
-    inProgress: 0,
-    deferred: 0,
-    completed: 0,
-  },
-  completionPercent: 0,
-  priorityData: [
-    { name: "High", count: 0 },
-    { name: "Normal", count: 0 },
-    { name: "Low", count: 0 },
-  ],
-  statusData: [
-    { name: "Completed", count: 0 },
-    { name: "Deferred", count: 0 },
-    { name: "In Progress", count: 0 },
-    { name: "On Hold", count: 0 },
-    { name: "Not Started", count: 0 },
-  ],
-  analytics: {
-    overdueCount: 0,
-    averageCompletionTimeHours: 0,
-    productivityScore: 0,
-    monthlyCompletionTrend: [],
-    velocity: [],
-  },
 });
 
 const getDefaultAnalyticsOverview = () => ({
@@ -103,7 +94,7 @@ const toApiTaskPayload = (task) => ({
   priority: task.priority,
   status: task.status,
   dueDate: task.dueDate || null,
-  deferredDate: task.status === "Deferred" ? task.deferredDate || null : null,
+  deferredDate: task.status === TASK_STATUS.DEFERRED ? task.deferredDate || null : null,
   remarks: task.remarks || "",
 });
 
@@ -169,7 +160,8 @@ export const useAppStore = create(
       },
       filters: getInitialFilters(),
       tasks: [],
-      dashboardStats: getDefaultDashboardStats(),
+      dashboardStats: null,
+      statsError: null,
       analyticsOverview: getDefaultAnalyticsOverview(),
       taskPagination: getInitialTaskPagination(),
       activity: [],
@@ -177,6 +169,7 @@ export const useAppStore = create(
         bootstrap: false,
         auth: false,
         tasks: false,
+        stats: false,
         analytics: false,
       },
       modals: {
@@ -595,7 +588,8 @@ export const useAppStore = create(
             user: null,
           },
           tasks: [],
-          dashboardStats: getDefaultDashboardStats(),
+          dashboardStats: null,
+          statsError: null,
           analyticsOverview: getDefaultAnalyticsOverview(),
           taskPagination: {
             ...getInitialTaskPagination(),
@@ -612,6 +606,7 @@ export const useAppStore = create(
 
       fetchTasks: async () => {
         const token = get().session.token;
+        const workspaceId = get().session.user?.defaultWorkspaceId;
         if (!token) {
           return;
         }
@@ -625,6 +620,7 @@ export const useAppStore = create(
         try {
           const query = {
             limit: taskPagination.limit,
+            workspaceId,
             status: filters.status,
             priority: filters.priority,
             month: filters.month,
@@ -688,32 +684,43 @@ export const useAppStore = create(
 
       fetchDashboardStats: async () => {
         const token = get().session.token;
+        const workspaceId = get().session.user?.defaultWorkspaceId;
         if (!token) {
           return;
         }
 
         abortIfRunning(statsAbortController);
         statsAbortController = new AbortController();
+        set((state) => ({ loading: { ...state.loading, stats: true } }));
 
         try {
           const response = await taskApi.stats(
             token,
-            {},
+            { workspaceId },
             { signal: statsAbortController.signal }
           );
-
-          const dashboardStats = response.data || getDefaultDashboardStats();
-          set({ dashboardStats });
+          const dashboardStats = response.data;
+          if (!isValidStatsPayload(dashboardStats)) {
+            throw new Error("Invalid dashboard stats response");
+          }
+          if (import.meta.env.DEV) {
+            console.debug("[dashboard-stats]", dashboardStats);
+          }
+          set({ dashboardStats, statsError: null });
         } catch (error) {
           if (error.name === "AbortError") {
             return;
           }
+          set({ statsError: error.message || "Failed to fetch dashboard stats." });
           toast.error(error.message || "Failed to fetch dashboard stats.");
+        } finally {
+          set((state) => ({ loading: { ...state.loading, stats: false } }));
         }
       },
 
       fetchAnalyticsOverview: async () => {
         const token = get().session.token;
+        const workspaceId = get().session.user?.defaultWorkspaceId;
         if (!token) {
           return;
         }
@@ -725,7 +732,7 @@ export const useAppStore = create(
         try {
           const response = await analyticsApi.overview(
             token,
-            {},
+            { workspaceId },
             { signal: analyticsAbortController.signal }
           );
           set({
@@ -810,9 +817,9 @@ export const useAppStore = create(
                   ...task,
                   status,
                   completedAt:
-                    status === "Completed" ? new Date().toISOString() : null,
+                    status === TASK_STATUS.COMPLETED ? new Date().toISOString() : null,
                   deferredDate:
-                    status === "Deferred" ? dayjs().format("YYYY-MM-DD") : null,
+                    status === TASK_STATUS.DEFERRED ? dayjs().format("YYYY-MM-DD") : null,
                 }
               : task
           ),
@@ -821,7 +828,7 @@ export const useAppStore = create(
         try {
           const response = await taskApi.update(token, taskId, {
             status,
-            deferredDate: status === "Deferred" ? dayjs().format("YYYY-MM-DD") : null,
+            deferredDate: status === TASK_STATUS.DEFERRED ? dayjs().format("YYYY-MM-DD") : null,
           });
 
           if (response?.task) {
@@ -930,7 +937,7 @@ export const useAppStore = create(
               title,
               description: readCell(cells, "description"),
               priority: readCell(cells, "priority") || "Normal",
-              status: readCell(cells, "status") || "Not Started",
+              status: readCell(cells, "status") || TASK_STATUS.NOT_STARTED,
               dueDate,
               deferredDate: readCell(cells, "deferredDate") || null,
               remarks: readCell(cells, "remarks"),

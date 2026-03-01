@@ -1,4 +1,6 @@
 import mongoose from "mongoose";
+import { TASK_PRIORITY_VALUES } from "../constants/task-priority.js";
+import { TASK_STATUS, TASK_STATUS_VALUES } from "../constants/task-status.js";
 
 const taskSchema = new mongoose.Schema(
   {
@@ -29,14 +31,14 @@ const taskSchema = new mongoose.Schema(
     },
     priority: {
       type: String,
-      enum: ["High", "Normal", "Low"],
+      enum: TASK_PRIORITY_VALUES,
       default: "Normal",
       index: true,
     },
     status: {
       type: String,
-      enum: ["Not Started", "In Progress", "On Hold", "Deferred", "Completed"],
-      default: "Not Started",
+      enum: TASK_STATUS_VALUES,
+      default: TASK_STATUS.NOT_STARTED,
       index: true,
     },
     dueDate: {
