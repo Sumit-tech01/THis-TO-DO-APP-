@@ -182,14 +182,8 @@ const SidebarComponent = ({
             <p className="flex items-center gap-2 text-sm font-semibold">
               <FiLifeBuoy size={14} /> Contact Support
             </p>
-            <a
-              href="https://sumitjagtap.vercel.app"
-              target="_blank"
-              rel="noreferrer"
-              className="mt-1 inline-block text-xs underline underline-offset-2"
-            >
-              sumitjagtap.vercel.app
-            </a>
+            <p className="mt-1 text-xs">enterprise-support@activityhub.com</p>
+            <p className="text-xs">+1 (800) 555-0128</p>
           </div>
         </section>
       </div>

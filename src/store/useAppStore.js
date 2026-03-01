@@ -671,18 +671,10 @@ export const useAppStore = create(
         abortIfRunning(statsAbortController);
         statsAbortController = new AbortController();
 
-        const { filters } = get();
-
         try {
           const response = await taskApi.stats(
             token,
-            {
-              status: filters.status,
-              priority: filters.priority,
-              month: filters.month,
-              dueDate: filters.dueDate,
-              search: filters.search,
-            },
+            {},
             { signal: statsAbortController.signal }
           );
 
@@ -706,18 +698,10 @@ export const useAppStore = create(
         analyticsAbortController = new AbortController();
         set((state) => ({ loading: { ...state.loading, analytics: true } }));
 
-        const { filters } = get();
-
         try {
           const response = await analyticsApi.overview(
             token,
-            {
-              status: filters.status,
-              priority: filters.priority,
-              month: filters.month,
-              dueDate: filters.dueDate,
-              search: filters.search,
-            },
+            {},
             { signal: analyticsAbortController.signal }
           );
           set({
@@ -833,7 +817,11 @@ export const useAppStore = create(
 
           get().addActivity("TASK_STATUS_UPDATED", { taskId, status });
           toast.success("Status updated.");
-          await Promise.all([get().fetchDashboardStats(), get().fetchAnalyticsOverview()]);
+          await Promise.all([
+            get().fetchTasks(),
+            get().fetchDashboardStats(),
+            get().fetchAnalyticsOverview(),
+          ]);
         } catch (error) {
           set({ tasks: previousTasks });
           toast.error(error.message || "Failed to update status.");

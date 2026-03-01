@@ -141,15 +141,7 @@ const App = () => {
     }
 
     fetchDashboardStats();
-  }, [
-    session.token,
-    filters.priority,
-    filters.status,
-    filters.month,
-    filters.dueDate,
-    filters.search,
-    fetchDashboardStats,
-  ]);
+  }, [session.token, fetchDashboardStats]);
 
   useEffect(() => {
     if (!session.token) {
@@ -157,15 +149,7 @@ const App = () => {
     }
 
     fetchAnalyticsOverview();
-  }, [
-    session.token,
-    filters.priority,
-    filters.status,
-    filters.month,
-    filters.dueDate,
-    filters.search,
-    fetchAnalyticsOverview,
-  ]);
+  }, [session.token, fetchAnalyticsOverview]);
 
   useEffect(() => {
     setSearchInput(filters.search || "");
